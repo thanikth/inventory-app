@@ -1,0 +1,32 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased min-h-screen;
+}
+
+.stock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  &.in-stock {
+    background-color: #dcfce7;
+    color: #15803d;
+  }
+
+  &.low-stock {
+    background-color: #fef9c3;
+    color: #a16207;
+  }
+
+  &.out-of-stock {
+    background-color: #fee2e2;
+    color: #b91c1c;
+  }
+}
