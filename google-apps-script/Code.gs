@@ -1,123 +1,288 @@
-function doGet() {
+function doGet(e) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const values = sheet.getDataRange().getValues();
-    const products = values.slice(1).map(row => ({
-      code: String(row[0] || "").trim(),
-      name: String(row[1] || "").trim(),
-      costPrice: Number(row[2]) || 0,
-      salePrice: Number(row[3]) || 0,
-      stock: Number(row[4]) || 0,
-      status: normalizeStatus(row[5])
-    })).filter(product => product.code !== "");
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const type =
+      e && e.parameter && e.parameter.type ? e.parameter.type : "products";
 
-    return jsonResponse({ status: "success", data: products });
-  } catch (error) {
-    return jsonResponse({ status: "error", message: error.toString() });
-  }
-}
+    // 1. ดึงข้อมูลพนักงาน
+    if (type === "employees") {
+      const sheet = ss.getSheetByName("Employees");
+      if (!sheet)
+        return createJsonResponse({
+          status: "error",
+          message: missingEmployeeSheetMessage(ss),
+        });
 
-function doPost(event) {
-  const lock = LockService.getScriptLock();
-  try {
-    const payload = JSON.parse(event.postData.contents);
-    const action = String(payload.action || "");
-    const product = normalizeProduct(payload.product);
-    if (action !== "create" && action !== "update") {
-      throw new Error("ไม่พบคำสั่งที่รองรับ");
-    }
+      const data = sheet.getDataRange().getValues();
+      const rows = data.slice(1); // ข้าม Header แถว 1
 
-    lock.waitLock(10000);
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const lastRow = sheet.getLastRow();
-    const rows = lastRow > 1
-      ? sheet.getRange(2, 1, lastRow - 1, 6).getValues()
-      : [];
-    const matchingRow = rows.findIndex(row =>
-      String(row[0] || "").trim().toLowerCase() === product.code.toLowerCase()
-    );
+      const employees = rows
+        .map((row, index) => ({
+          id: index + 1,
+          userId: String(row[0] || "").trim(),
+          password: String(row[1] || "").trim(), // รหัสผ่าน (Admin ดู/จัดการได้)
+          nickname: String(row[2] || "").trim(),
+          firstName: String(row[3] || "").trim(),
+          lastName: String(row[4] || "").trim(),
+          address: String(row[5] || "").trim(),
+          phone: String(row[6] || "").trim(),
+          branch: String(row[7] || "").trim(),
+          position: String(row[8] || "").trim(),
+          salary: Number(row[9]) || 0,
+          employmentType: String(row[10] || "").trim(),
+          status: isEmployeeActive(row[11]),
+        }))
+        .filter(
+          (emp) =>
+            emp.userId !== "" || emp.firstName !== "" || emp.nickname !== "",
+        );
 
-    if (action === "create" && matchingRow !== -1) {
-      throw new Error("รหัสสินค้านี้มีอยู่แล้ว กรุณาใช้รหัสอื่น");
-    }
-    if (action === "update" && matchingRow === -1) {
-      throw new Error("ไม่พบสินค้าที่ต้องการแก้ไข");
-    }
+      return createJsonResponse({ status: "success", data: employees });
 
-    if (sheet.getLastColumn() < 6 || !sheet.getRange(1, 6).getValue()) {
-      sheet.getRange(1, 6).setValue("สถานะ");
-    }
-
-    const rowValues = [
-      product.code,
-      product.name,
-      product.costPrice,
-      product.salePrice,
-      product.stock,
-      product.status
-    ];
-    if (action === "create") {
-      sheet.appendRow(rowValues);
+      // 2. ดึงข้อมูลสินค้า
     } else {
-      sheet.getRange(matchingRow + 2, 1, 1, rowValues.length).setValues([rowValues]);
+      let sheet = ss.getSheetByName("Products");
+      if (!sheet) sheet = ss.getSheets()[0];
+
+      const data = sheet.getDataRange().getValues();
+      const rows = data.slice(1);
+      const products = rows
+        .map((row) => ({
+          code: String(row[0] || "").trim(),
+          name: String(row[1] || "").trim(),
+          costPrice: Number(row[2]) || 0,
+          salePrice: Number(row[3]) || 0,
+          stock: Number(row[4]) || 0,
+        }))
+        .filter((item) => item.code !== "");
+
+      return createJsonResponse({ status: "success", data: products });
+    }
+  } catch (error) {
+    return createJsonResponse({ status: "error", message: error.toString() });
+  }
+}
+
+function doPost(e) {
+  try {
+    const postData = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // กรณีที่ 1: เพิ่มพนักงานใหม่
+    if (postData.action === "addEmployee") {
+      const emp = postData.data;
+
+      // ตรวจสอบข้อมูลจำเป็น: ชื่อ (ชื่อเล่นหรือชื่อจริง) และเบอร์โทรศัพท์
+      if ((!emp.nickname && !emp.firstName) || !emp.phone) {
+        return createJsonResponse({
+          status: "error",
+          message: "กรุณากรอกชื่อและเบอร์โทรศัพท์ (ข้อมูลจำเป็น)",
+        });
+      }
+
+      const sheet = ss.getSheetByName("Employees");
+      if (!sheet)
+        return createJsonResponse({
+          status: "error",
+          message: missingEmployeeSheetMessage(ss),
+        });
+
+      const lastRow = sheet.getLastRow();
+
+      // ถ้าไม่ได้ระบุ userId มา ให้สร้างให้อัตโนมัติ เช่น EMP001, EMP002
+      const autoUserId = "EMP" + String(lastRow).padStart(3, "0");
+      const finalUserId = emp.userId ? String(emp.userId).trim() : autoUserId;
+
+      // ถ้าไม่ได้ระบุ password ให้ใช้ 4 ตัวท้ายของเบอร์โทร หรือค่าเริ่มต้น 1234
+      const defaultPassword = emp.phone ? emp.phone.slice(-4) : "1234";
+      const finalPassword = emp.password
+        ? String(emp.password).trim()
+        : defaultPassword;
+
+      // บันทึกลง Sheet แถวใหม่ (คอลัมน์ A ถึง L)
+      sheet.appendRow([
+        finalUserId,
+        finalPassword,
+        emp.nickname || "",
+        emp.firstName || "",
+        emp.lastName || "",
+        emp.address || "",
+        emp.phone || "",
+        emp.branch || "",
+        emp.position || "",
+        Number(emp.salary) || 0,
+        emp.employmentType || "ประจำ",
+        emp.status === undefined || emp.status === null || emp.status === ""
+          ? true
+          : isEmployeeActive(emp.status),
+      ]);
+
+      return createJsonResponse({
+        status: "success",
+        message: "เพิ่มข้อมูลพนักงานสำเร็จ",
+        data: { userId: finalUserId },
+      });
     }
 
-    return jsonResponse({ status: "success", data: product });
+    // กรณีที่ 2: ระบบเข้าสู่ระบบ (Login) สำหรับพนักงาน
+    if (postData.action === "loginEmployee") {
+      const { userId, password } = postData.data;
+      const sheet = ss.getSheetByName("Employees");
+      if (!sheet)
+        return createJsonResponse({
+          status: "error",
+          message: missingEmployeeSheetMessage(ss),
+        });
+
+      const data = sheet.getDataRange().getValues().slice(1);
+      const employees = data.filter((row) =>
+        row.some((value) => String(value || "").trim() !== ""),
+      );
+      const submittedUserId = String(userId || "").trim();
+      const submittedPassword = String(password || "").trim();
+
+      if (
+        employees.length === 0 &&
+        submittedUserId === "admin" &&
+        submittedPassword === "1234"
+      ) {
+        createDefaultAdmin(sheet);
+      }
+
+      const currentEmployees = sheet.getDataRange().getValues().slice(1);
+      const user = currentEmployees.find(
+        (row) =>
+          String(row[0] || "").trim() === submittedUserId &&
+          String(row[1] || "").trim() === submittedPassword &&
+          isEmployeeActive(row[11]),
+      );
+
+      if (user) {
+        return createJsonResponse({
+          status: "success",
+          message: "เข้าสู่ระบบสำเร็จ",
+          user: {
+            userId: user[0],
+            nickname: user[2],
+            firstName: user[3],
+            position: user[8],
+            branch: user[7],
+            employmentType: String(user[10] || "").trim(),
+            mustChangePassword:
+              String(user[12] || "").trim().toLowerCase() === "true",
+          },
+        });
+      } else {
+        return createJsonResponse({
+          status: "error",
+          message: "userId หรือ password ไม่ถูกต้อง",
+        });
+      }
+    }
+
+    if (postData.action === "changeEmployeePassword") {
+      const { userId, currentPassword, newPassword } = postData.data || {};
+      const submittedUserId = String(userId || "").trim();
+      const submittedCurrentPassword = String(currentPassword || "").trim();
+      const submittedNewPassword = String(newPassword || "").trim();
+
+      if (submittedNewPassword.length < 8) {
+        return createJsonResponse({
+          status: "error",
+          message: "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร",
+        });
+      }
+      if (submittedNewPassword === submittedCurrentPassword) {
+        return createJsonResponse({
+          status: "error",
+          message: "กรุณาตั้งรหัสผ่านใหม่ที่ไม่ซ้ำกับรหัสผ่านเดิม",
+        });
+      }
+
+      const sheet = ss.getSheetByName("Employees");
+      if (!sheet)
+        return createJsonResponse({
+          status: "error",
+          message: missingEmployeeSheetMessage(ss),
+        });
+
+      const rows = sheet.getDataRange().getValues();
+      const rowIndex = rows.findIndex(
+        (row, index) =>
+          index > 0 &&
+          String(row[0] || "").trim() === submittedUserId &&
+          String(row[1] || "").trim() === submittedCurrentPassword &&
+          isEmployeeActive(row[11]) &&
+          String(row[12] || "").trim().toLowerCase() === "true",
+      );
+
+      if (rowIndex === -1) {
+        return createJsonResponse({
+          status: "error",
+          message: "ไม่สามารถเปลี่ยนรหัสผ่านได้ กรุณาเข้าสู่ระบบใหม่",
+        });
+      }
+
+      sheet.getRange(rowIndex + 1, 2).setValue(submittedNewPassword);
+      sheet.getRange(rowIndex + 1, 13).setValue(false);
+      return createJsonResponse({
+        status: "success",
+        message: "เปลี่ยนรหัสผ่านสำเร็จ",
+      });
+    }
+
+    return createJsonResponse({
+      status: "error",
+      message: "Action ไม่ถูกต้อง",
+    });
   } catch (error) {
-    return jsonResponse({ status: "error", message: error.toString() });
+    return createJsonResponse({ status: "error", message: error.toString() });
+  }
+}
+
+function createJsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(
+    ContentService.MimeType.JSON,
+  );
+}
+
+function isEmployeeActive(status) {
+  return status === true || String(status || "").trim().toLowerCase() === "true";
+}
+
+function missingEmployeeSheetMessage(ss) {
+  const sheetNames = ss.getSheets().map((sheet) => sheet.getName());
+  return `ไม่พบแท็บ Employees ใน Spreadsheet ที่เชื่อมอยู่ แท็บที่พบ: ${JSON.stringify(sheetNames)} ตรวจสอบว่า Apps Script ผูกกับ Spreadsheet ที่ถูกต้อง และชื่อแท็บตรงทุกตัวอักษร`;
+}
+
+function createDefaultAdmin(sheet) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const employees = sheet.getDataRange().getValues().slice(1).filter((row) =>
+      row.some((value) => String(value || "").trim() !== ""),
+    );
+    if (employees.length === 0) {
+      if (!sheet.getRange(1, 13).getValue()) {
+        sheet.getRange(1, 13).setValue("ต้องเปลี่ยนรหัสผ่าน");
+      }
+      sheet.appendRow([
+        "admin",
+        "1234",
+        "Admin",
+        "Admin",
+        "",
+        "",
+        "",
+        "",
+        "Admin",
+        0,
+        "admin",
+        true,
+        true,
+      ]);
+    }
   } finally {
-    if (lock.hasLock()) lock.releaseLock();
+    lock.releaseLock();
   }
-}
-
-function normalizeProduct(value) {
-  if (!value || typeof value !== "object") {
-    throw new Error("ข้อมูลสินค้าไม่ถูกต้อง");
-  }
-
-  const code = String(value.code || "").trim();
-  const name = String(value.name || "").trim();
-  const costPrice = Number(value.costPrice);
-  const salePrice = Number(value.salePrice);
-  const stock = Number(value.stock);
-  const requestedStatus = String(value.status || "pending").trim().toLowerCase();
-  if (!["pending", "active", "inactive"].includes(requestedStatus)) {
-    throw new Error("สถานะสินค้าไม่ถูกต้อง");
-  }
-  const status = requestedStatus;
-
-  if (!code || !name) {
-    throw new Error("กรุณาระบุรหัสสินค้าและชื่อสินค้า");
-  }
-  if (
-    value.costPrice === "" ||
-    value.costPrice === null ||
-    value.salePrice === "" ||
-    value.salePrice === null ||
-    value.stock === "" ||
-    value.stock === null ||
-    !isFinite(costPrice) ||
-    !isFinite(salePrice) ||
-    !isFinite(stock) ||
-    costPrice < 0 ||
-    salePrice < 0 ||
-    stock < 0 ||
-    Math.floor(stock) !== stock
-  ) {
-    throw new Error("ราคาหรือจำนวนสินค้าไม่ถูกต้อง");
-  }
-
-  return { code, name, costPrice, salePrice, stock, status };
-}
-
-function normalizeStatus(value) {
-  const status = String(value || "").trim().toLowerCase();
-  if (!status || status === "active" || status === "พร้อมใช้งาน") return "active";
-  if (status === "pending" || status === "รอตรวจสอบ") return "pending";
-  return "inactive";
-}
-
-function jsonResponse(value) {
-  return ContentService.createTextOutput(JSON.stringify(value))
-    .setMimeType(ContentService.MimeType.JSON);
 }

@@ -1,13 +1,13 @@
 ﻿"use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import type { Product, ProductStatus } from "@/types/product";
+import type { EmployeeSession } from "@/types/employee";
 import { ProductTable } from "@/components/ProductTable";
-import { AdminModal } from "@/components/AdminModal";
+import { LoginForm } from "@/components/LoginForm";
 import { ProductFormModal } from "@/components/ProductFormModal";
 import {
   Shield,
-  ShieldAlert,
   LogOut,
   RefreshCw,
   Search,
@@ -54,10 +54,9 @@ const FALLBACK_PRODUCTS: Product[] = [
 
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>("");
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [employee, setEmployee] = useState<EmployeeSession | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState<boolean>(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isFallback, setIsFallback] = useState<boolean>(false);
@@ -65,7 +64,9 @@ export default function Home() {
   const [updatingProductCode, setUpdatingProductCode] = useState<string | null>(null);
   const [statusSaved, setStatusSaved] = useState(false);
 
-  const fetchProducts = async () => {
+  const isAdmin = employee?.employmentType?.trim().toLowerCase() === "admin";
+
+  const fetchProducts = useCallback(async () => {
     setLoading(true);
 
     try {
@@ -85,11 +86,15 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    if (employee) void fetchProducts();
+  }, [employee, fetchProducts]);
+
+  if (!employee) {
+    return <LoginForm onLogin={setEmployee} />;
+  }
 
   const filteredProducts = products
     .filter((product) => {
@@ -180,10 +185,10 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-100 text-violet-700 text-xs font-semibold rounded-lg border border-violet-200">
                 <Shield className="w-4 h-4" />
-                โหมด Admin (เห็นราคาทุน)
+                Admin: {employee.nickname || employee.firstName || employee.userId}
               </span>
               <button
-                onClick={() => setIsAdmin(false)}
+                onClick={() => setEmployee(null)}
                 className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -191,13 +196,18 @@ export default function Home() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white text-xs font-medium rounded-xl hover:bg-slate-800 transition shadow-sm"
-            >
-              <ShieldAlert className="w-4 h-4 text-violet-400" />
-              เข้าสู่ระบบ Admin
-            </button>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-slate-600">
+                {employee.nickname || employee.firstName || employee.userId}
+              </span>
+              <button
+                onClick={() => setEmployee(null)}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                ออกจากระบบ
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -230,18 +240,20 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              setEditingProduct(null);
-              setActionError("");
-              setIsProductModalOpen(true);
-            }}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition self-end sm:self-auto"
-          >
-            <Plus className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            เพิ่มสินค้าใหม่
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setEditingProduct(null);
+                setActionError("");
+                setIsProductModalOpen(true);
+              }}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition self-end sm:self-auto"
+            >
+              <Plus className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              เพิ่มสินค้าใหม่
+            </button>
+          )}
 
           <button
             onClick={fetchProducts}
@@ -289,19 +301,15 @@ export default function Home() {
         </>
       )}
 
-      <ProductFormModal
-        isOpen={isProductModalOpen}
-        product={editingProduct}
-        products={products}
-        onClose={() => setIsProductModalOpen(false)}
-        onSave={saveProduct}
-      />
-
-      <AdminModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSuccess={() => setIsAdmin(true)}
-      />
+      {isAdmin && (
+        <ProductFormModal
+          isOpen={isProductModalOpen}
+          product={editingProduct}
+          products={products}
+          onClose={() => setIsProductModalOpen(false)}
+          onSave={saveProduct}
+        />
+      )}
 
       {statusSaved && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
