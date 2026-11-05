@@ -539,9 +539,6 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
               ล้างรายการ
             </button>
           )}
-          <p className="mt-3 text-center text-xs text-slate-400">
-            ยืนยันแล้วจะบันทึกลงชีต Sales และตัดสต็อกสินค้า
-          </p>
         </div>
       </section>
 
@@ -823,7 +820,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
                 )}
 
                 <p className="mt-2 text-xs font-medium text-amber-700 print:hidden">
-                  ตรวจสอบว่าเงินเข้าบัญชีแล้วก่อนกด “พิมพ์ใบเสร็จ”
+                  ตรวจสอบว่าเงินเข้าบัญชีแล้วก่อนกด “ทำรายการสำเร็จ”
                 </p>
               </div>
               {notice && (
@@ -842,7 +839,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
                 disabled={savingSale || Boolean(requestIdRef.current)}
                 className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
-                ทำรายการสำเร็จ
+                กลับไปแก้ไขรายการ
               </button>
               <button
                 type="button"
@@ -850,7 +847,9 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
                 disabled={savingSale || !paymentQr}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {savingSale ? "กำลังบันทึกและเตรียมใบเสร็จ..." : "พิมพ์ใบเสร็จ"}
+                {savingSale
+                  ? "กำลังบันทึกและเตรียมใบเสร็จ..."
+                  : "ทำรายการสำเร็จ"}
               </button>
             </div>
           </div>
