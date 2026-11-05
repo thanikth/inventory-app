@@ -145,8 +145,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       const source = URL.createObjectURL(file);
       try {
         const image = new window.Image();
-        image.src = source;
-        await image.decode();
+        if (typeof image.decode === "function") {
+          image.src = source;
+          await image.decode();
+        } else {
+          await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error("ไม่สามารถอ่านรูปภาพได้"));
+            image.src = source;
+          });
+        }
 
         const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
         const canvas = document.createElement("canvas");
