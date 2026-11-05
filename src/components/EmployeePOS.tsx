@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import generatePayload from "promptpay-qr";
+import QRCode from "qrcode";
 import {
   ArrowDown,
   Barcode,
@@ -45,6 +47,8 @@ interface Receipt {
   total: number;
 }
 
+const PROMPTPAY_PHONE = "0802083199";
+
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat("th-TH", {
     style: "currency",
@@ -65,11 +69,43 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
   const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
+  const [paymentReceipt, setPaymentReceipt] = useState<Receipt | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [paymentQr, setPaymentQr] = useState("");
+  const [paymentQrError, setPaymentQrError] = useState("");
   const [savingSale, setSavingSale] = useState(false);
   const requestIdRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!paymentReceipt) {
+      setPaymentQr("");
+      setPaymentQrError("");
+      return;
+    }
+
+    try {
+      if (!Number.isFinite(paymentReceipt.total) || paymentReceipt.total <= 0) {
+        throw new Error("ยอดชำระต้องมากกว่า 0 บาทจึงจะสร้าง QR ได้");
+      }
+
+      const payload = generatePayload(PROMPTPAY_PHONE, {
+        amount: Number(paymentReceipt.total.toFixed(2)),
+      });
+      void QRCode.toDataURL(payload, {
+        errorCorrectionLevel: "M",
+        margin: 2,
+        width: 240,
+      })
+        .then(setPaymentQr)
+        .catch(() => setPaymentQrError("สร้าง QR พร้อมเพย์ไม่สำเร็จ"));
+    } catch (error) {
+      setPaymentQrError(
+        error instanceof Error ? error.message : "สร้าง QR พร้อมเพย์ไม่สำเร็จ",
+      );
+    }
+  }, [paymentReceipt]);
 
   useEffect(() => {
     if (!isScannerOpen) return;
@@ -80,7 +116,9 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
     const startScanner = async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error("ไม่สามารถเข้าถึงกล้องได้ กรุณาใช้ HTTPS และอนุญาตการใช้กล้อง");
+          throw new Error(
+            "ไม่สามารถเข้าถึงกล้องได้ กรุณาใช้ HTTPS และอนุญาตการใช้กล้อง",
+          );
         }
 
         const video = videoRef.current;
@@ -129,6 +167,13 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
     };
   }, [isScannerOpen]);
 
+  const handleCloseScanner = () => {
+    setIsScannerOpen(false);
+    setIsSaleModalOpen(false);
+    setScannerError("");
+    setQuery("");
+  };
+
   const availableProducts = useMemo(
     () =>
       products.filter(
@@ -156,9 +201,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
   const addProduct = (product: Product, closeModal = false) => {
     if (requestIdRef.current) return;
     setNotice("");
-    const currentItem = cart.find(
-      (item) => item.product.code === product.code,
-    );
+    const currentItem = cart.find((item) => item.product.code === product.code);
     if (currentItem && currentItem.quantity >= product.stock) {
       setNotice(`สินค้า ${product.code} มีในสต็อกไม่พอ`);
       return;
@@ -198,9 +241,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
   const changeQuantity = (product: Product, change: number) => {
     if (requestIdRef.current) return;
     setNotice("");
-    const currentItem = cart.find(
-      (item) => item.product.code === product.code,
-    );
+    const currentItem = cart.find((item) => item.product.code === product.code);
     if (!currentItem) return;
     if (currentItem.quantity + change > product.stock) {
       setNotice(`สินค้า ${product.code} มีในสต็อกไม่พอ`);
@@ -217,8 +258,26 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
     );
   };
 
+  const showPaymentQr = () => {
+    if (cart.length === 0) return;
+    setNotice("");
+    setPaymentReceipt({
+      number: "",
+      issuedAt: new Date(),
+      employeeName,
+      items: cart.map(({ product, quantity }) => ({
+        code: product.code,
+        name: product.name,
+        quantity,
+        unitPrice: product.salePrice,
+        lineTotal: product.salePrice * quantity,
+      })),
+      total,
+    });
+  };
+
   const completeSale = async () => {
-    if (savingSale || cart.length === 0) return;
+    if (savingSale || !paymentReceipt || cart.length === 0) return;
     setSavingSale(true);
     setNotice("");
     requestIdRef.current ??= crypto.randomUUID();
@@ -256,7 +315,9 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
         !Array.isArray(sale.items) ||
         typeof sale.total !== "number"
       ) {
-        throw new Error("บันทึกการขายแล้ว แต่ข้อมูลใบเสร็จไม่ถูกต้อง กรุณารีเฟรช");
+        throw new Error(
+          "บันทึกการขายแล้ว แต่ข้อมูลใบเสร็จไม่ถูกต้อง กรุณารีเฟรช",
+        );
       }
 
       setReceipt({
@@ -266,13 +327,16 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
         items: sale.items,
         total: sale.total,
       });
+      setPaymentReceipt(null);
       requestIdRef.current = null;
       setCart([]);
       setIsSaleModalOpen(false);
       void onRefresh();
     } catch (error) {
       setNotice(
-        error instanceof Error ? error.message : "บันทึกการขายไม่สำเร็จ กรุณาลองใหม่",
+        error instanceof Error
+          ? error.message
+          : "บันทึกการขายไม่สำเร็จ กรุณาลองใหม่",
       );
     } finally {
       setSavingSale(false);
@@ -317,7 +381,11 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
           <span>
             กำลังแสดงข้อมูลตัวอย่าง สินค้าในรายการอาจไม่ตรงกับสต็อกจริง
           </span>
-          <button type="button" onClick={onRefresh} className="font-semibold underline">
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="font-semibold underline"
+          >
             ลองเชื่อมต่ออีกครั้ง
           </button>
         </div>
@@ -451,20 +519,12 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
           </div>
           <button
             type="button"
-            onClick={completeSale}
+            onClick={showPaymentQr}
             disabled={cart.length === 0 || savingSale}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {savingSale ? (
-              "กำลังบันทึกการขาย..."
-            ) : (
-              <>
-                <Printer className="h-4 w-4" />
-                {requestIdRef.current
-                  ? "ลองบันทึกการขายอีกครั้ง"
-                  : "ยืนยันการขายและออกใบเสร็จ"}
-              </>
-            )}
+            <Printer className="h-4 w-4" />
+            ชำระเงินและตรวจสอบ
           </button>
           {cart.length > 0 && (
             <button
@@ -504,7 +564,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setIsSaleModalOpen(false)}
+                onClick={() => handleCloseScanner()}
                 disabled={savingSale}
                 aria-label="ปิดหน้าคิดเงิน"
                 className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
@@ -586,7 +646,6 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
                           <img
                             src={product.imageData}
                             alt=""
-                            loading="lazy"
                             className="aspect-square w-full bg-slate-100 object-cover"
                           />
                         ) : (
@@ -681,7 +740,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
         </div>
       )}
 
-              {receipt && (
+      {paymentReceipt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm">
           <div
             role="dialog"
@@ -692,15 +751,18 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 print:hidden">
               <div>
                 <h2 id="receipt-title" className="font-bold text-slate-900">
-                  ตรวจสอบใบเสร็จ
+                  รอรับชำระเงิน
                 </h2>
-                <p className="text-xs text-slate-500">พร้อมสำหรับพิมพ์</p>
+                <p className="text-xs text-slate-500">
+                  ตรวจสอบยอดเงินเข้าในแอปธนาคารก่อนยืนยัน
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setReceipt(null)}
+                onClick={() => setPaymentReceipt(null)}
+                disabled={savingSale || Boolean(requestIdRef.current)}
                 aria-label="ปิดใบเสร็จ"
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -709,6 +771,115 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
               <div className="text-center">
                 <Check className="mx-auto h-8 w-8 text-emerald-500 print:hidden" />
                 <h3 className="mt-2 text-lg font-bold text-slate-900">
+                  ใบเสร็จรับเงิน
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">ยอดชำระ</p>
+              </div>
+              <div className="my-5 border-t border-dashed border-slate-300" />
+              <div className="space-y-3">
+                {paymentReceipt.items.map((item) => (
+                  <div
+                    key={item.code}
+                    className="flex justify-between gap-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-800">{item.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {item.quantity} x {formatCurrency(item.unitPrice)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-medium">
+                      {formatCurrency(item.lineTotal)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="my-5 border-t border-dashed border-slate-300" />
+              <div className="flex justify-between text-lg font-bold text-slate-900">
+                <span>ยอดรวมทั้งสิ้น</span>
+                <span>{formatCurrency(paymentReceipt.total)}</span>
+              </div>
+              <div className="mt-4 border-t border-dashed border-slate-300 pt-4 text-center">
+                <p className="text-sm font-semibold text-slate-800">
+                  สแกนจ่ายผ่านพร้อมเพย์
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  ยอดชำระ {formatCurrency(paymentReceipt.total)}
+                </p>
+                {paymentQr ? (
+                  <img
+                    src={paymentQr}
+                    alt={`QR พร้อมเพย์ ยอด ${formatCurrency(paymentReceipt.total)}`}
+                    className="mx-auto mt-3 h-48 w-48"
+                  />
+                ) : paymentQrError ? (
+                  <p role="alert" className="mt-3 text-xs text-rose-600">
+                    {paymentQrError}
+                  </p>
+                ) : (
+                  <p className="mt-3 text-xs text-slate-500">
+                    กำลังสร้าง QR พร้อมเพย์...
+                  </p>
+                )}
+
+                <p className="mt-2 text-xs font-medium text-amber-700 print:hidden">
+                  ตรวจสอบว่าเงินเข้าบัญชีแล้วก่อนกด “พิมพ์ใบเสร็จ”
+                </p>
+              </div>
+              {notice && (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700 print:hidden"
+                >
+                  {notice}
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2 border-t border-slate-100 p-4 print:hidden">
+              <button
+                type="button"
+                onClick={() => setPaymentReceipt(null)}
+                disabled={savingSale || Boolean(requestIdRef.current)}
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                ทำรายการสำเร็จ
+              </button>
+              <button
+                type="button"
+                onClick={completeSale}
+                disabled={savingSale || !paymentQr}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingSale ? "กำลังบันทึกและเตรียมใบเสร็จ..." : "พิมพ์ใบเสร็จ"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {receipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sale-success-title"
+            className="w-full max-w-md rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="p-6 text-center print:hidden">
+              <Check className="mx-auto h-12 w-12 text-emerald-500" />
+              <h2
+                id="sale-success-title"
+                className="mt-3 text-xl font-bold text-slate-900"
+              >
+                ทำรายการสำเร็จ
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                บันทึกการขายและตัดสต็อกเรียบร้อยแล้ว
+              </p>
+            </div>
+            <div id="receipt-print" className="px-6 pb-6">
+              <div className="text-center">
+                <h3 className="text-lg font-bold text-slate-900">
                   ใบเสร็จรับเงิน
                 </h3>
                 <p className="mt-1 text-xs text-slate-500">
@@ -724,7 +895,10 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
               <div className="my-5 border-t border-dashed border-slate-300" />
               <div className="space-y-3">
                 {receipt.items.map((item) => (
-                  <div key={item.code} className="flex justify-between gap-3 text-sm">
+                  <div
+                    key={item.code}
+                    className="flex justify-between gap-3 text-sm"
+                  >
                     <div>
                       <p className="font-medium text-slate-800">{item.name}</p>
                       <p className="text-xs text-slate-500">
@@ -745,9 +919,6 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
               <p className="mt-6 text-center text-xs text-slate-500">
                 ขอบคุณที่ใช้บริการ
               </p>
-              <p className="mt-2 text-center text-[10px] text-slate-400 print:hidden">
-                รายการขายนี้ถูกบันทึกลงระบบและตัดสต็อกแล้ว
-              </p>
             </div>
             <div className="flex gap-2 border-t border-slate-100 p-4 print:hidden">
               <button
@@ -755,7 +926,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
                 onClick={() => setReceipt(null)}
                 className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
               >
-                กลับไปแก้รายการ
+                ปิด
               </button>
               <button
                 type="button"

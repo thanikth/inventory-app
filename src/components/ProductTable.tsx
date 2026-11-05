@@ -73,7 +73,6 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                       <img
                         src={item.imageData}
                         alt={item.name}
-                        loading="lazy"
                         className="h-10 w-10 rounded-lg border border-slate-200 object-cover"
                       />
                     ) : (
