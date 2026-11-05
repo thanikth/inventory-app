@@ -6,6 +6,11 @@ import type { EmployeeSession } from "@/types/employee";
 import { ProductTable } from "@/components/ProductTable";
 import { LoginForm } from "@/components/LoginForm";
 import { ProductFormModal } from "@/components/ProductFormModal";
+import { EmployeePOS } from "@/components/EmployeePOS";
+import {
+  EmployeeFormModal,
+  type NewEmployee,
+} from "@/components/EmployeeFormModal";
 import {
   Shield,
   LogOut,
@@ -58,10 +63,19 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [employee, setEmployee] = useState<EmployeeSession | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState<boolean>(false);
+  const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [createdEmployee, setCreatedEmployee] = useState<{
+    userId: string;
+    password: string;
+  } | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editingEmployee, setEditingEmployee] =
+    useState<EmployeeSession | null>(null);
   const [isFallback, setIsFallback] = useState<boolean>(false);
   const [actionError, setActionError] = useState("");
-  const [updatingProductCode, setUpdatingProductCode] = useState<string | null>(null);
+  const [updatingProductCode, setUpdatingProductCode] = useState<string | null>(
+    null,
+  );
   const [statusSaved, setStatusSaved] = useState(false);
 
   const isAdmin = employee?.employmentType?.trim().toLowerCase() === "admin";
@@ -118,7 +132,9 @@ export default function Home() {
     });
     const result = await response.json();
     if (!response.ok) {
-      throw new Error(result.message || `บันทึกข้อมูลไม่สำเร็จ (${response.status})`);
+      throw new Error(
+        result.message || `บันทึกข้อมูลไม่สำเร็จ (${response.status})`,
+      );
     }
 
     if (result.status !== "success") {
@@ -139,7 +155,28 @@ export default function Home() {
     setActionError("");
   };
 
-  const updateProductStatus = async (product: Product, status: ProductStatus) => {
+  const saveEmployee = async (newEmployee: NewEmployee) => {
+    const response = await fetch("/api/employees", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "addEmployee", data: newEmployee }),
+    });
+    const result = await response.json();
+
+    if (!response.ok || result.status !== "success") {
+      throw new Error(result.message || "เพิ่มข้อมูลพนักงานไม่สำเร็จ");
+    }
+
+    setCreatedEmployee({
+      userId: result.data?.userId || newEmployee.userId || "",
+      password: newEmployee.password || newEmployee.phone.slice(-4),
+    });
+  };
+
+  const updateProductStatus = async (
+    product: Product,
+    status: ProductStatus,
+  ) => {
     if (updatingProductCode) return;
     setUpdatingProductCode(product.code);
     setActionError("");
@@ -163,6 +200,19 @@ export default function Home() {
     }
   };
 
+  if (!isAdmin) {
+    return (
+      <EmployeePOS
+        employee={employee}
+        products={products}
+        loading={loading}
+        isFallback={isFallback}
+        onRefresh={fetchProducts}
+        onLogout={() => setEmployee(null)}
+      />
+    );
+  }
+
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
       <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
@@ -185,7 +235,8 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-100 text-violet-700 text-xs font-semibold rounded-lg border border-violet-200">
                 <Shield className="w-4 h-4" />
-                Admin: {employee.nickname || employee.firstName || employee.userId}
+                Admin:{" "}
+                {employee.nickname || employee.firstName || employee.userId}
               </span>
               <button
                 onClick={() => setEmployee(null)}
@@ -241,18 +292,35 @@ export default function Home() {
 
         <div className="flex items-center gap-2">
           {isAdmin && (
-            <button
-              onClick={() => {
-                setEditingProduct(null);
-                setActionError("");
-                setIsProductModalOpen(true);
-              }}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition self-end sm:self-auto"
-            >
-              <Plus className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              เพิ่มสินค้าใหม่
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setEditingProduct(null);
+                  setActionError("");
+                  setIsProductModalOpen(true);
+                }}
+                disabled={loading}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition self-end sm:self-auto"
+              >
+                <Plus
+                  className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+                />
+                เพิ่มสินค้าใหม่
+              </button>
+
+              <button
+                onClick={() => {
+                  setActionError("");
+                  setCreatedEmployee(null);
+                  setIsEmployeeModalOpen(true);
+                }}
+                disabled={loading}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition self-end sm:self-auto"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                เพิ่มพนักงานใหม่
+              </button>
+            </>
           )}
 
           <button
@@ -269,7 +337,10 @@ export default function Home() {
       </div>
 
       {actionError && (
-        <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {actionError}
         </div>
       )}
@@ -309,6 +380,62 @@ export default function Home() {
           onClose={() => setIsProductModalOpen(false)}
           onSave={saveProduct}
         />
+      )}
+
+      {isAdmin && (
+        <EmployeeFormModal
+          isOpen={isEmployeeModalOpen}
+          onClose={() => setIsEmployeeModalOpen(false)}
+          onSave={saveEmployee}
+        />
+      )}
+
+      {isAdmin && createdEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="employee-created-title"
+            className="relative w-full max-w-sm rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-2xl"
+          >
+            <button
+              type="button"
+              onClick={() => setCreatedEmployee(null)}
+              aria-label="ปิดหน้าต่าง"
+              className="absolute right-4 top-4 text-slate-400 transition hover:text-slate-600"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" />
+            <h2
+              id="employee-created-title"
+              className="mt-3 text-lg font-bold text-slate-800"
+            >
+              เพิ่มพนักงานสำเร็จ
+            </h2>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-left text-sm">
+              <p>
+                <span className="text-slate-500">รหัสผู้ใช้: </span>
+                <strong className="font-mono text-slate-800">
+                  {createdEmployee.userId}
+                </strong>
+              </p>
+              <p className="mt-1">
+                <span className="text-slate-500">รหัสผ่านเริ่มต้น: </span>
+                <strong className="font-mono text-slate-800">
+                  {createdEmployee.password}
+                </strong>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCreatedEmployee(null)}
+              className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700"
+            >
+              ตกลง
+            </button>
+          </div>
+        </div>
       )}
 
       {statusSaved && (

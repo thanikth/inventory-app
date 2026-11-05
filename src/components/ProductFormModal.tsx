@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle, ImagePlus, X } from "lucide-react";
 import type { Product } from "@/types/product";
 
 interface ProductFormModalProps {
@@ -18,6 +18,7 @@ type ProductFormValues = {
   costPrice: string;
   salePrice: string;
   stock: string;
+  imageData: string;
 };
 
 const EMPTY_FORM: ProductFormValues = {
@@ -26,7 +27,10 @@ const EMPTY_FORM: ProductFormValues = {
   costPrice: "",
   salePrice: "",
   stock: "",
+  imageData: "",
 };
+
+const MAX_IMAGE_DATA_URL_LENGTH = 45_000;
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   isOpen,
@@ -48,6 +52,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             costPrice: String(product.costPrice ?? ""),
             salePrice: String(product.salePrice),
             stock: String(product.stock),
+            imageData: product.imageData ?? "",
           }
         : EMPTY_FORM,
     );
@@ -100,6 +105,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         salePrice,
         stock,
         status: product?.status ?? "pending",
+        imageData: values.imageData,
       });
       onClose();
     } catch (saveError) {
@@ -115,6 +121,72 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   const updateField = (field: keyof ProductFormValues, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleImageChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("กรุณาเลือกไฟล์รูปภาพ");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setError("รูปภาพต้องมีขนาดไม่เกิน 10 MB");
+      return;
+    }
+
+    setError("");
+    try {
+      const source = URL.createObjectURL(file);
+      try {
+        const image = new window.Image();
+        image.src = source;
+        await image.decode();
+
+        const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("ไม่สามารถประมวลผลรูปภาพได้");
+
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        let imageData = "";
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          for (const quality of [0.82, 0.68, 0.54, 0.4]) {
+            imageData = canvas.toDataURL("image/jpeg", quality);
+            if (imageData.length <= MAX_IMAGE_DATA_URL_LENGTH) break;
+          }
+          if (imageData.length <= MAX_IMAGE_DATA_URL_LENGTH) break;
+          canvas.width = Math.max(1, Math.round(canvas.width * 0.8));
+          canvas.height = Math.max(1, Math.round(canvas.height * 0.8));
+          context.fillStyle = "#fff";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        }
+
+        if (imageData.length > MAX_IMAGE_DATA_URL_LENGTH) {
+          throw new Error("รูปภาพมีขนาดใหญ่เกินไปแม้บีบอัดแล้ว");
+        }
+        updateField("imageData", imageData);
+      } finally {
+        URL.revokeObjectURL(source);
+      }
+    } catch (imageError) {
+      setError(
+        imageError instanceof Error
+          ? imageError.message
+          : "ไม่สามารถอ่านรูปภาพได้",
+      );
+    }
   };
 
   const inputClass =
@@ -203,6 +275,40 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               className={inputClass}
             />
           </label>
+          <div>
+            <label className="block text-sm font-medium text-slate-700">
+              รูปสินค้า
+              <span className="mt-1 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50">
+                <ImagePlus className="h-4 w-4" />
+                เลือกรูป (ระบบย่อและบีบอัดให้อัตโนมัติ)
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  className="sr-only"
+                />
+              </span>
+            </label>
+            {values.imageData && (
+              <div className="mt-2 flex items-center gap-3">
+                <img
+                  src={values.imageData}
+                  alt="ตัวอย่างรูปสินค้า"
+                  className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => updateField("imageData", "")}
+                  className="text-sm text-red-600 hover:text-red-700"
+                >
+                  ลบรูป
+                </button>
+              </div>
+            )}
+            <p className="mt-1 text-xs text-slate-500">
+              รูปจะถูกบีบอัดให้เหมาะกับข้อจำกัดของ Google Sheets
+            </p>
+          </div>
 
           {error && (
             <div role="alert" className="flex items-center gap-2 text-sm text-red-600">

@@ -5,6 +5,7 @@
   salePrice: number;
   stock: number;
   status?: ProductStatus;
+  imageData?: string;
 }
 
 export type ProductStatus = "pending" | "active" | "inactive";

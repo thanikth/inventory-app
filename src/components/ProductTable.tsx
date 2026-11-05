@@ -52,6 +52,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
         <table>
           <thead>
             <tr>
+              <th>รูป</th>
               <th>รหัสสินค้า</th>
               <th>ชื่อสินค้า</th>
               {isAdmin && <th>ราคาต้นทุน (Cost)</th>}
@@ -67,6 +68,20 @@ export const ProductTable: React.FC<ProductTableProps> = ({
               const profit = (item.salePrice || 0) - (item.costPrice || 0);
               return (
                 <tr key={item.code}>
+                  <td>
+                    {item.imageData ? (
+                      <img
+                        src={item.imageData}
+                        alt={item.name}
+                        loading="lazy"
+                        className="h-10 w-10 rounded-lg border border-slate-200 object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
+                        <Package className="h-5 w-5" />
+                      </span>
+                    )}
+                  </td>
                   <td className="font-mono font-medium text-slate-700">{item.code}</td>
                   <td className="font-medium text-slate-900">{item.name}</td>
                   {isAdmin && (
