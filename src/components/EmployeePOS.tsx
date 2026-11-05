@@ -45,19 +45,6 @@ interface Receipt {
   total: number;
 }
 
-interface DetectedBarcode {
-  rawValue: string;
-}
-
-interface BarcodeDetectorInstance {
-  detect: (source: HTMLVideoElement) => Promise<DetectedBarcode[]>;
-}
-
-interface BarcodeDetectorConstructor {
-  new (options?: { formats?: string[] }): BarcodeDetectorInstance;
-  getSupportedFormats?: () => Promise<string[]>;
-}
-
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat("th-TH", {
     style: "currency",
@@ -88,78 +75,41 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
     if (!isScannerOpen) return;
 
     let cancelled = false;
-    let stream: MediaStream | null = null;
-    let scanTimeout: ReturnType<typeof setTimeout> | null = null;
+    let stopScanner: (() => void) | undefined;
 
     const startScanner = async () => {
       try {
-        const Detector = (
-          window as Window & { BarcodeDetector?: BarcodeDetectorConstructor }
-        ).BarcodeDetector;
-        if (!Detector) {
-          throw new Error(
-            "เบราว์เซอร์นี้ไม่รองรับการสแกนบาร์โค้ดจากกล้อง กรุณาใช้ Chrome เวอร์ชันล่าสุด",
-          );
-        }
         if (!navigator.mediaDevices?.getUserMedia) {
           throw new Error("ไม่สามารถเข้าถึงกล้องได้ กรุณาใช้ HTTPS และอนุญาตการใช้กล้อง");
         }
 
-        const formats = [
-          "ean_13",
-          "ean_8",
-          "upc_a",
-          "upc_e",
-          "code_128",
-          "code_39",
-          "itf",
-          "qr_code",
-        ];
-        const supportedFormats = Detector.getSupportedFormats
-          ? await Detector.getSupportedFormats()
-          : formats;
-        const detector = new Detector({
-          formats: formats.filter((format) => supportedFormats.includes(format)),
-        });
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: "environment" } },
-        });
-
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
         const video = videoRef.current;
         if (!video) throw new Error("ไม่พบพื้นที่แสดงภาพจากกล้อง");
 
-        video.srcObject = stream;
-        await video.play();
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        if (cancelled) return;
 
-        const scanFrame = async () => {
-          if (cancelled) return;
-          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            try {
-              const results = await detector.detect(video);
-              const barcode = results.find((result) => result.rawValue.trim());
-              if (barcode) {
-                setQuery(barcode.rawValue.trim());
-                setNotice("");
-                setIsScannerOpen(false);
-                window.setTimeout(() => searchRef.current?.focus(), 0);
-                return;
-              }
-            } catch {
-              if (!cancelled) {
-                setScannerError("อ่านบาร์โค้ดไม่สำเร็จ กรุณาลองจัดตำแหน่งสินค้าใหม่");
-              }
-              return;
-            }
-          }
-          scanTimeout = setTimeout(() => void scanFrame(), 200);
-        };
+        const reader = new BrowserMultiFormatReader();
+        const controls = await reader.decodeFromConstraints(
+          {
+            audio: false,
+            video: { facingMode: { ideal: "environment" } },
+          },
+          video,
+          (result) => {
+            if (cancelled || !result) return;
+            setQuery(result.getText().trim());
+            setNotice("");
+            setIsScannerOpen(false);
+            window.setTimeout(() => searchRef.current?.focus(), 0);
+          },
+        );
 
-        void scanFrame();
+        if (cancelled) {
+          controls.stop();
+          return;
+        }
+        stopScanner = controls.stop;
       } catch (error) {
         if (!cancelled) {
           setScannerError(
@@ -174,8 +124,7 @@ export const EmployeePOS: React.FC<EmployeePOSProps> = ({
 
     return () => {
       cancelled = true;
-      if (scanTimeout !== null) clearTimeout(scanTimeout);
-      stream?.getTracks().forEach((track) => track.stop());
+      stopScanner?.();
       if (videoRef.current) videoRef.current.srcObject = null;
     };
   }, [isScannerOpen]);
