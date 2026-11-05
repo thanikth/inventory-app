@@ -6,6 +6,30 @@ body {
   @apply bg-slate-50 text-slate-900 antialiased min-h-screen;
 }
 
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #receipt-print,
+  #receipt-print * {
+    visibility: visible !important;
+  }
+
+  #receipt-print {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    padding: 0 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+}
+
 .stock-badge {
   display: inline-flex;
   align-items: center;
